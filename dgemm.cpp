@@ -13,6 +13,12 @@ using namespace cl;
 #endif
 
 
+#ifdef FIXED_WG_SIZE
+#define WG_SIZE_ATTR cl::sycl::attribute<cl::sycl::reqd_work_group_size<FIXED_WG_SIZE, FIXED_WG_SIZE>>
+#else 
+#define WG_SIZE_ATTR
+#endif
+
 // Matrix multiplication benchmark
 //
 //  Computes C = A x B for matrices A, B and C of sizes:
@@ -33,7 +39,7 @@ void get_true_solution(const int Ndim, const int Mdim, const int Pdim, double * 
 double error(const int Ndim, const int Mdim, double * C, double * Cgold);
 
 
-#ifdef __HIPSYCL__
+#ifdef HIPSYCL_EXT_SCOPED_PARALLELISM_V2
 void matmul_scopedpar(sycl::queue& Q, const size_t Ndim, const size_t Mdim, const size_t Pdim, sycl::buffer<double,2>& A, sycl::buffer<double,2>& B, sycl::buffer<double,2>& C);
 #endif
 
@@ -82,35 +88,37 @@ int main(int argc, char *argv[]) {
   //
   // Initial version
   //
-  {
-    std::cout << "  Simple version:" << std::endl << std::endl;
+  // {
+  //   std::cout << "  Simple version:" << std::endl << std::endl;
 
-    // Make sure previous work finished for accurate timing
+  //   // Make sure previous work finished for accurate timing
+  //   zero_matrix(Q, Ndim, Mdim, C);
+  //   Q.wait_and_throw();
+
+  //   auto tic = clock::now();
+  //   matmul(Q, Ndim, Mdim, Pdim, A, B, C);
+  //   auto toc = clock::now();
+
+
+  //   double err = error(Ndim, Mdim, C.get_access<sycl::access_mode::read>().get_pointer(), Cgold);
+
+  //   if (err < 1.0E-8) {
+  //     std::cout << "  Solution correct" << std::endl;
+  //   } else {
+  //     std::cout
+  //       << "  Solution *NOT* correct" << std::endl
+  //       << "    Error = " << err << std::endl;
+  //   }
+
+  //   // Print timings
+    std::cout
+      << "  GFLOP/s: " << 0 << std::endl;
     zero_matrix(Q, Ndim, Mdim, C);
     Q.wait_and_throw();
 
-    auto tic = clock::now();
-    matmul(Q, Ndim, Mdim, Pdim, A, B, C);
-    auto toc = clock::now();
-
-
-    double err = error(Ndim, Mdim, C.get_access<sycl::access_mode::read>().get_pointer(), Cgold);
-
-    if (err < 1.0E-8) {
-      std::cout << "  Solution correct" << std::endl;
-    } else {
-      std::cout
-        << "  Solution *NOT* correct" << std::endl
-        << "    Error = " << err << std::endl;
-    }
-
-    // Print timings
-    std::cout
-      << "  matmul took " << timing{toc-tic}.count() << " s" << std::endl
-      << "  GFLOP/s: " << 1.0E-9 * 2.0 * Ndim * Mdim * Pdim / (timing{toc-tic}.count()) << std::endl;
-
-    std::cout << "  --------------------------------" << std::endl << std::endl;
-  }
+    matmul_hipar(Q, Ndim, Mdim, Pdim, A, B, C);
+  //   std::cout << "  --------------------------------" << std::endl << std::endl;
+  // }
 
   //
   // nd_range blocked version
@@ -179,7 +187,7 @@ int main(int argc, char *argv[]) {
   //
   // hipSYCL Scoped Parallelism extension
   //
-  #ifdef __HIPSYCL__
+  #ifdef HIPSYCL_EXT_SCOPED_PARALLELISM_V2
   {
     std::cout << "  Scoped parallelism version:" << std::endl << std::endl;
 
@@ -300,7 +308,7 @@ void matmul_blocked(sycl::queue& Q, const size_t Ndim, const size_t Mdim, const 
     sycl::accessor<double, 2, sycl::access_mode::read_write, sycl::access::target::local> Awrk({Bsize, Bsize}, cgh);
     sycl::accessor<double, 2, sycl::access_mode::read_write, sycl::access::target::local> Bwrk({Bsize, Bsize}, cgh);
 
-    cgh.parallel_for(sycl::nd_range<2>{{Ndim, Mdim}, {Bsize, Bsize}}, [=](sycl::nd_item<2> idx) {
+    cgh.parallel_for(sycl::nd_range<2>{{Ndim, Mdim}, {Bsize, Bsize}}, WG_SIZE_ATTR([=](sycl::nd_item<2> idx) {
 
       // This work-item will compute C(i,j)
       const size_t i = idx.get_global_id(0);
@@ -334,7 +342,7 @@ void matmul_blocked(sycl::queue& Q, const size_t Ndim, const size_t Mdim, const 
         //sycl::group_barrier(idx.get_group());
         idx.barrier();
       }
-    });
+    }));
   }).wait();
 
 }
@@ -397,7 +405,7 @@ void matmul_hipar(sycl::queue& Q, const size_t Ndim, const size_t Mdim, const si
 
 }
 
-#ifdef __HIPSYCL__
+#ifdef HIPSYCL_EXT_SCOPED_PARALLELISM_V2
 void matmul_scopedpar(sycl::queue& Q, const size_t Ndim, const size_t Mdim, const size_t Pdim, sycl::buffer<double,2>& A, sycl::buffer<double,2>& B, sycl::buffer<double,2>& C) {
 
   const size_t Bsize = 16;
